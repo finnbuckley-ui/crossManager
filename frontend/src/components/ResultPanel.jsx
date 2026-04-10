@@ -14,7 +14,7 @@ function toEta(seconds) {
   return `${m}m ${String(s).padStart(2, '0')}s`
 }
 
-export default function ResultPanel({ result, statusData }) {
+export default function ResultPanel({ result, statusData, onNewClip }) {
   if (!result) {
     return (
       <section className="panel">
@@ -63,9 +63,22 @@ export default function ResultPanel({ result, statusData }) {
         {status === 'error' && <p className="error">{statusData?.error || 'Processing failed.'}</p>}
 
         {status === 'complete' && (
-          <a className="primary" style={{ display: 'inline-block', textDecoration: 'none' }} href={`/api/download/${result.job_id}`}>
-            Download .mp4
-          </a>
+          <div className="row">
+            <a className="primary" style={{ display: 'inline-block', textDecoration: 'none' }} href={`/api/download/${result.job_id}`}>
+              Download .mp4
+            </a>
+            <button className="mode-btn" type="button" onClick={onNewClip}>
+              New clip / new source
+            </button>
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div className="row">
+            <button className="mode-btn" type="button" onClick={onNewClip}>
+              Try another source
+            </button>
+          </div>
         )}
       </section>
 

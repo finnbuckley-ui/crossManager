@@ -133,6 +133,8 @@ def _video_dynamics_series(video_path: Path, sample_fps: float = 2.0) -> Tuple[n
     motion: List[float] = []
     shot_change: List[float] = []
     face_presence: List[float] = []
+    face_area: List[float] = []
+    face_center_offset: List[float] = []
 
     prev_gray = None
     frame_idx = 0
@@ -148,10 +150,18 @@ def _video_dynamics_series(video_path: Path, sample_fps: float = 2.0) -> Tuple[n
             t = frame_idx / fps
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            face_count = len(
-                FACE_CASCADE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(50, 50))
-            )
+            faces = FACE_CASCADE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(50, 50))
+            face_count = len(faces)
             face_presence.append(float(min(1.0, face_count / 2.0)))
+
+            if face_count > 0:
+                x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+                face_area.append(float((w * h) / max(1, frame.shape[0] * frame.shape[1])))
+                face_cx = float(x + (w / 2.0))
+                face_center_offset.append(abs(face_cx - (frame.shape[1] / 2.0)) / max(1.0, frame.shape[1] / 2.0))
+            else:
+                face_area.append(0.0)
+                face_center_offset.append(1.0)
 
             if prev_gray is None:
                 diff_mean = 0.0
@@ -172,6 +182,8 @@ def _video_dynamics_series(video_path: Path, sample_fps: float = 2.0) -> Tuple[n
         np.array(motion, dtype=np.float32),
         np.array(shot_change, dtype=np.float32),
         np.array(face_presence, dtype=np.float32),
+        np.array(face_area, dtype=np.float32),
+        np.array(face_center_offset, dtype=np.float32),
     )
 
 
@@ -187,13 +199,15 @@ def _pick_best_window(
     motion: np.ndarray,
     shots: np.ndarray,
     faces: np.ndarray,
+    face_area: np.ndarray,
+    face_center_offset: np.ndarray,
     audio: np.ndarray,
     audio_hop_s: float,
 ) -> Tuple[int, int, int, str]:
     if duration_s <= 35:
         return 0, int(max(30, min(35, duration_s))), 6, "Short source video; selected the strongest available continuous segment."
 
-    clip_duration = int(max(30, min(60, 55 if duration_s >= 70 else duration_s * 0.75)))
+    clip_duration = int(max(30, min(60, 50 if duration_s >= 70 else duration_s * 0.7)))
     max_start = max(0, int(duration_s) - clip_duration)
     if max_start <= 0:
         return 0, clip_duration, 6, "Selected the highest-intensity section from a short source video."
@@ -210,6 +224,8 @@ def _pick_best_window(
         vm = motion[video_mask]
         vs = shots[video_mask]
         vf = faces[video_mask]
+        vaa = face_area[video_mask]
+        vco = face_center_offset[video_mask]
 
         a0 = int(start / audio_hop_s)
         a1 = max(a0 + 1, int(end / audio_hop_s))
@@ -220,17 +236,21 @@ def _pick_best_window(
         motion_std = float(np.std(vm))
         shot_density = float(np.mean(vs))
         face_mean = float(np.mean(vf))
+        face_area_mean = float(np.mean(vaa))
+        face_center_score = 1.0 - float(np.mean(vco))
         audio_mean = float(np.mean(va)) if va.size else 0.0
         audio_peak = float(np.percentile(va, 90)) if va.size else 0.0
 
-        # Weighted for hooks + narrative movement while penalizing chaotic footage.
+        # Weighted for hooks + stable framing while penalizing chaotic footage.
         score = (
-            0.34 * audio_mean
-            + 0.22 * audio_peak
-            + 0.18 * shot_density
-            + 0.16 * motion_mean
-            + 0.10 * face_mean
-            - 0.14 * motion_std
+            0.35 * audio_mean
+            + 0.17 * audio_peak
+            + 0.18 * face_mean
+            + 0.12 * face_area_mean
+            + 0.10 * face_center_score
+            + 0.10 * shot_density
+            + 0.08 * motion_mean
+            - 0.18 * motion_std
         )
 
         if score > best_score:
@@ -239,8 +259,7 @@ def _pick_best_window(
 
     viral_score = int(max(1, min(10, round(5 + best_score * 6))))
     reason = (
-        "Locally selected for high speech/audio energy, frequent visual changes, and stable on-screen subject presence, "
-        "which usually improves short-form retention."
+        "Locally selected for strong speech/audio energy and a stable, centered on-screen subject, with just enough visual change to keep retention high."
     )
     return best_start, clip_duration, viral_score, reason
 
@@ -263,7 +282,7 @@ def local_pick_clip_for_video(video_id: str, preferred_title: str | None = None)
         _extract_audio_wav(analysis_video, wav_path)
         audio_series, audio_hop_s = _audio_energy_series(wav_path, hop_seconds=0.5)
 
-        times, motion, shots, faces = _video_dynamics_series(analysis_video, sample_fps=2.0)
+        times, motion, shots, faces, face_area, face_center_offset = _video_dynamics_series(analysis_video, sample_fps=2.0)
         if duration <= 0 and times.size:
             duration = float(times[-1])
 
@@ -273,6 +292,8 @@ def local_pick_clip_for_video(video_id: str, preferred_title: str | None = None)
             motion=motion,
             shots=shots,
             faces=faces,
+            face_area=face_area,
+            face_center_offset=face_center_offset,
             audio=audio_series,
             audio_hop_s=audio_hop_s,
         )
@@ -628,7 +649,7 @@ def _build_ass_subtitles(words: List[Dict[str, Any]], width: int, height: int) -
         "[V4+ Styles]",
         "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
         f"Style: Default,Arial,{base_font_size},{grey_color},{yellow_color},{outline_color},{box_color},1,0,0,0,100,100,0,0,1,3,0,8,80,80,120,1",
-        f"Style: Box,Arial,{base_font_size},{box_color},{box_color},{box_color},&H80000000&,1,0,0,0,100,100,0,0,3,0,0,8,0,0,0,1",
+        f"Style: Box,Arial,{base_font_size},{box_color},{box_color},{outline_color},{box_color},1,0,0,0,100,100,0,0,3,0,0,8,80,80,120,1",
         "",
         "[Events]",
         "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
@@ -636,27 +657,22 @@ def _build_ass_subtitles(words: List[Dict[str, Any]], width: int, height: int) -
 
     events: List[str] = []
     base_y = int(height * 0.74)
-    line_gap = int(base_font_size * 1.55)
 
-    for line_index, line_words in enumerate(lines):
+    for line_words in lines:
         font_size = _fit_line_font_size(line_words, font_path, base_font_size, max_text_width)
         line_text = " ".join(item["word"] for item in line_words)
-        line_width = _measure_text_px(line_text, font_path, font_size)
-        line_height = int(font_size * 1.75)
-        box_w = min(width - 40, line_width + 60)
-        box_h = line_height + 20
         center_x = int(width / 2)
-        box_y = base_y + line_index * line_gap
-        text_y = box_y - (box_h // 4)
+        box_y = base_y
+        text_y = box_y
 
         line_start = float(line_words[0]["start"])
         line_end = float(line_words[-1]["end"] + 0.18)
         line_start_text = _ass_time(line_start)
         line_end_text = _ass_time(line_end)
 
-        box_path = f"m {-box_w//2} {-box_h//2} l {box_w//2} {-box_h//2} {box_w//2} {box_h//2} {-box_w//2} {box_h//2}"
         events.append(
-            f"Dialogue: 0,{line_start_text},{line_end_text},Box,,0,0,0,,{{\\p1\\an8\\pos({center_x},{box_y})\\1c{box_color}\\1a&H66&\\bord0\\shad0}}{box_path}{{\\p0}}"
+            f"Dialogue: 0,{line_start_text},{line_end_text},Box,,0,0,0,,"
+            f"{{\\an8\\pos({center_x},{box_y})\\fs{font_size}\\bord0\\shad0\\1c{box_color}\\1a&H66&}}{_ass_escape(line_text)}"
         )
 
         line_total_cs = max(1, int(round((line_end - line_start) * 100)))

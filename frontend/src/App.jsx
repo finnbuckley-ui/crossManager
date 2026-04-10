@@ -10,6 +10,13 @@ export default function App() {
   const [result, setResult] = useState(null)
   const [statusData, setStatusData] = useState(null)
 
+  function resetJob() {
+    setInput('')
+    setResult(null)
+    setStatusData(null)
+    setLoading(false)
+  }
+
   useEffect(() => {
     if (!result?.job_id) return
     if (statusData?.status === 'complete' || statusData?.status === 'error') return
@@ -74,7 +81,7 @@ export default function App() {
 
       <div className="grid">
         <InputPanel mode={mode} input={input} setInput={setInput} onSubmit={submit} loading={loading} />
-        <ResultPanel result={result} statusData={statusData} />
+        <ResultPanel result={result} statusData={statusData} onNewClip={resetJob} />
       </div>
     </main>
   )

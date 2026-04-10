@@ -19,7 +19,7 @@ export default function InputPanel({ mode, input, setInput, onSubmit, loading })
           />
           <div className="row" style={{ marginTop: 10 }}>
             {EXAMPLES.map((item) => (
-              <button key={item} className="chip" onClick={() => setInput(item)}>
+              <button key={item} type="button" className="chip" onClick={() => setInput(item)}>
                 {item}
               </button>
             ))}
