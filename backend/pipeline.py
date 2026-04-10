@@ -658,7 +658,7 @@ def _build_ass_subtitles(words: List[Dict[str, Any]], width: int, height: int) -
     events: List[str] = []
     base_y = int(height * 0.74)
 
-    for line_words in lines:
+    for line_index, line_words in enumerate(lines):
         font_size = _fit_line_font_size(line_words, font_path, base_font_size, max_text_width)
         line_text = " ".join(item["word"] for item in line_words)
         center_x = int(width / 2)
@@ -666,7 +666,13 @@ def _build_ass_subtitles(words: List[Dict[str, Any]], width: int, height: int) -
         text_y = box_y
 
         line_start = float(line_words[0]["start"])
-        line_end = float(line_words[-1]["end"] + 0.18)
+        natural_end = float(line_words[-1]["end"] + 0.06)
+        if line_index + 1 < len(lines):
+            next_start = float(lines[line_index + 1][0]["start"])
+            line_end = min(natural_end, next_start - 0.04)
+        else:
+            line_end = natural_end
+        line_end = max(line_start + 0.04, line_end)
         line_start_text = _ass_time(line_start)
         line_end_text = _ass_time(line_end)
 
