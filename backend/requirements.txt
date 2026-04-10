@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+yt-dlp
+ffmpeg-python
+openai-whisper
+opencv-python
+numpy
+pillow
+python-dotenv
+httpx
+python-multipart

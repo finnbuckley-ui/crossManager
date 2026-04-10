@@ -1,0 +1,13 @@
+.venv/
+backend/.env
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.cache/
+output/
+.DS_Store
+Thumbs.db
+*.log
